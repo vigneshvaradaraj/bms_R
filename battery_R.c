@@ -10,6 +10,7 @@ typedef void (*eventHandler_t)(void);
      OVER_CURRENT,
      SHORT_CIRCUIT,
      CELL_IMBALANCE,
+	 THERMAL_RUNAWAY,
     
      ERROR_MAX
  }error_t;
@@ -22,14 +23,13 @@ typedef void (*eventHandler_t)(void);
 
  typedef enum
  {
-    VOLTAGE_TEMP_UPDATE_EVENT,
-    DERATED_CURRENT_CAL_EVENT,
-    PRECHARGE_EVENT,
-    DISCHARGE_EVENT,
-    CHARGE_EVENT,
-    THERMAL_RUNAWAY_EVENT,
-    SOO_EVENT,
-    BLANCING_EVENT,
+    VOLTAGE_TEMP_EVENT, //AFE ISR triggers when all the voltage and temp updated via DMA
+    DERATED_CURRENT_CAL_EVENT, 
+    PRECHARGE_EVENT,		   //TODO
+    CHARGE_DISCHARGE_EVENT,    //TODO
+    THERMAL_RUNAWAY_EVENT,     
+    SOO_EVENT,					
+    BLANCING_EVENT,            //TODO
     EVENT_MAX
  }BatteryEvent_t;
 
@@ -77,6 +77,11 @@ typedef void (*eventHandler_t)(void);
      uint8_t tempMean;
  }tempData_t;
 
+ tyepdef struct
+ {
+	 uint8_t cellVoltageMax;
+	 uint8_t cellVoltageMin;
+ }cellVoltageData_t
  struct
  {
      int16_t allCellTemp[CELL_TEMP_SENSOR_COUNT];
@@ -84,13 +89,29 @@ typedef void (*eventHandler_t)(void);
      current_t current;
      uint8_t soc;
      tempData_t cellTemp;
-    
+     cellVoltageData_t cellvolt;
  }gCVT_s;
 
  eventHandler_t evetArray[STATE_MAX][EVENT_MAX] = \
  {
-    [CHARGING_STATE] = {VOLTAGE_TEMP_UPDATE_EVENT_h,chargeDeratedCurrent_h,PRECHARGE_EVENT_h,DISCHARGE_EVENT_h,CHARGE_EVENT_h,SOO_EVENT_h},
-	[DISCHARGING_STATE] = {VOLTAGE_TEMP_UPDATE_EVENT_h,disChargeDeratedCurrent_h,PRECHARGE_EVENT_h,DISCHARGE_EVENT_h,CHARGE_EVENT_h,SOO_EVENT_h}
+    [CHARGING_STATE] = {
+							VOLTAGE_TEMP_UPDATE_EVENT_h,\
+							chargeDeratedCurrent_h,\
+							PRECHARGE_EVENT_h,\
+							CHARGE_EVENT_h,\
+							thermalRunaway_h,\
+							chargeSOO_EVENT_h,\
+							cellBlancing_h\
+						},
+	[DISCHARGING_STATE] = {
+							VOLTAGE_TEMP_UPDATE_EVENT_h,\
+							disChargeDeratedCurrent_h,\
+							PRECHARGE_EVENT_h,\
+							DISCHARGE_EVENT_h,\
+							thermalRunaway_h,\
+							dischargeSOO_EVENT_h,\
+							cellBlancing_h\
+						  }
 
  };
  gErrInfo_s arrayError[ERROR_MAX];
@@ -129,7 +150,7 @@ void VOLTAGE_TEMP_UPDATE_EVENT_h(void)//This event should be posted from AFE ISR
     
     for(int i = 1;i < CELL_TEMP_SENSOR_COUNT;i++)
     {
-        gCVT_s.cellTemp.tempMin = MIN(testArry[i],gCVT_s.cellTemp.tempMin);
+        gCVT_s.cellTemp.tempMin = MIN(gCVT_s.allCellTemp[i],gCVT_s.cellTemp.tempMin);
     }
     
     gCVT_s.cellTemp.tempMax = gCVT_s.allCellTemp[0];
@@ -138,8 +159,20 @@ void VOLTAGE_TEMP_UPDATE_EVENT_h(void)//This event should be posted from AFE ISR
     {
         gCVT_s.cellTemp.tempMax = MAX(testArry[i],gCVT_s.cellTemp.tempMax);
     }
+
+	gCVT_s.cellvolt.cellVoltageMin = gCVT_s.allCellVoltage[0];
     
-    //TODO: voltage needs to be implemented
+    for(int i = 1;i < CELLS_IN_SERIES_COUNT;i++)
+    {
+        gCVT_s.cellvolt.cellVoltageMin = MIN(gCVT_s.allCellVoltage[i],gCVT_s.cellvolt.cellVoltageMin);
+    }
+    
+    gCVT_s.cellvolt.cellVoltageMax = gCVT_s.allCellVoltage[0];
+    
+    for(int i = 1;i < CELLS_IN_SERIES_COUNT;i++)
+    {
+        gCVT_s.cellvolt.cellVoltageMax = MIN(gCVT_s.allCellVoltage[i],gCVT_s.cellvolt.cellVoltageMax);
+    }
 }
 
 void chargeDeratedCurrent_h(void)
@@ -165,26 +198,67 @@ void CHARGE_EVENT_h(void)
     
 }
 
-void SOO_EVENT_h(void)//event needs to be triggered every 1 sec once
+void thermalRunaway_h(void)
 {
-    updateDischargeTankValue();
+	if(gCVT_s.cellvolt.cellVoltageMax > THERMAL_RUNAWAY_VOLTAGE_THRESHOLD || gCVT_s.cellTemp.tempMax > THERMAL_RUNAWAY_TEMP_THRESHOLD)
+	{
+		setError(THERMAL_RUNAWAY);
+	}
+	
+}
+
+void chargeSOO_EVENT_h(void)//event needs to be triggered every 1 sec once
+{
     updateChargeTankValue();
-    
-    gSoo_s.dischargeTankValue += (gCVT_s.current.dischargeCurrent * gCVT_s.current.dischargeCurrent) - (DISCHARGE_RECO_CURRENT * DISCHARGE_RECO_CURRENT);
     gSoo_s.chargeTankValue += (gCVT_s.current.chargeCurrent * gCVT_s.current.chargeCurrent) - (CHARGE_RECO_CURRENT * CHARGE_RECO_CURRENT);
     
-    gSoo_s.remainingDischargeTankValue = gSoo_s.deratedDischargeTankValue - gSoo_s.dischargeTankValue;
     gSoo_s.remainingChargeTankValue = gSoo_s.deratedChargeTankValue - gSoo_s.ChargeTankValue;
     
-    gSoo_s.dischargePeakRecoCurrent = sqrt((gSoo_s.remainingDischargeTankValue/TANK_DELTA_TIME) + (gSoo_s.dischargeRecoCurrent * gSoo_s.dischargeRecoCurrent));
     gSoo_s.chargePeakRecoCurrent = sqrt((gSoo_s.remainingChargeTankValue/TANK_DELTA_TIME) + (gSoo_s.chargeRecoCurrent * gSoo_s.chargeRecoCurrent));
     
-    if((gSoo_s.dischargeTankValue > gSoo_s.deratedDischargeTankValue) || (gSoo_s.chargeTankValue > gSoo_s.deratedChargeTankValue))
+    if(gSoo_s.chargeTankValue > gSoo_s.deratedChargeTankValue)
     {
         setError(OVER_LOAD);
     }
 }
 
+void dischargeSOO_EVENT_h(void)//event needs to be triggered every 1 sec once
+{
+    updateDischargeTankValue();
+    
+    gSoo_s.dischargeTankValue += (gCVT_s.current.dischargeCurrent * gCVT_s.current.dischargeCurrent) - (DISCHARGE_RECO_CURRENT * DISCHARGE_RECO_CURRENT);
+    
+    gSoo_s.remainingDischargeTankValue = gSoo_s.deratedDischargeTankValue - gSoo_s.dischargeTankValue;
+    
+    gSoo_s.dischargePeakRecoCurrent = sqrt((gSoo_s.remainingDischargeTankValue/TANK_DELTA_TIME) + (gSoo_s.dischargeRecoCurrent * gSoo_s.dischargeRecoCurrent));
+    
+    if((gSoo_s.dischargeTankValue > gSoo_s.deratedDischargeTankValue))
+    {
+        setError(OVER_LOAD);
+    }
+}
+
+void cellBlancing_h(void)
+{
+	uint16_t cellMask = 0;//uint16_t max 16 cells in series
+	for(int i = 0; i < CELLS_IN_SERIES_COUNT;i++)
+	{
+		if(gCVT_s.allCellVoltage[i] > CELL_BALANCING_THRESHOLD_FORCE_START)
+		{
+			cellMask |= (1 << i);
+			continue;
+		}
+		if(gCVT_s.allCellVoltage[i] < CELL_BALANCING_THRESHOLD_FORCE_STOP)
+		{
+			cellMask &= ~(1 << i);
+			continue;
+		}
+        //TODO: delta implimentation pending
+		
+	}
+	
+	setBalancingCellMask(cellMask);
+}
 
  void setError(error_t errorType)
  {
@@ -198,14 +272,12 @@ void SOO_EVENT_h(void)//event needs to be triggered every 1 sec once
  
 void getChargeSOPderatedFactor(uint8_t* chargeSopDeratedFactor)
 {
-    *chargeSopDeratedFactor = calculateSOPfactor(gCVT_s.soc,gCVT_s.temp.tempMax);
-	//TODO: add charge parameter to calculateSOPfactor()
+    *chargeSopDeratedFactor = calculateSOPfactor(CHARGING,gCVT_s.soc,gCVT_s.temp.tempMax);
 }
 
 void getDischargeSOPderatedFactor(uint8_t* dischargeSopDeratedFactor)
 {
-    *dischargeSopDeratedFactor = calculateSOPfactor(gCVT_s.soc,gCVT_s.temp.tempMax);
-	//TODO: add discharge parameter to calculateSOPfactor()
+    *dischargeSopDeratedFactor = calculateSOPfactor(DISCHARGING,gCVT_s.soc,gCVT_s.temp.tempMax);
 }
 void updateDischargeTankValue(void)
 {
