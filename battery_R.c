@@ -241,6 +241,10 @@ void dischargeSOO_EVENT_h(void)//event needs to be triggered every 1 sec once
 void cellBlancing_h(void)
 {
 	uint16_t cellMask = 0;//uint16_t max 16 cells in series
+	/*check list before balancing the cells
+		1)There should be no error
+		2)Check cell Temp threshold
+	*/
 	for(int i = 0; i < CELLS_IN_SERIES_COUNT;i++)
 	{
 		if(gCVT_s.allCellVoltage[i] > CELL_BALANCING_THRESHOLD_FORCE_START)
