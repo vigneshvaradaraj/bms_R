@@ -8,7 +8,7 @@ typedef enum
 	PDU_EVENT_MAX
 }pduTaskEvent_t;
 
-void pduTask(void)
+void pduTask(void) /* This Task should be high priority */
 {
 	pduTaskEvent_t event;
 	while(1)

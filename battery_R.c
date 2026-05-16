@@ -92,6 +92,8 @@ typedef void (*eventHandler_t)(void);
      cellVoltageData_t cellvolt;
  }gCVT_s;
 
+ int16_t thermalRunawayCellTempWindow[CELL_TEMP_SENSOR_COUNT][THERMAL_RUNAWAY_TEMP_SAMPLE_COUNT] = {0};
+
  eventHandler_t evetArray[STATE_MAX][EVENT_MAX] = \
  {
     [CHARGING_STATE] = {
@@ -200,10 +202,25 @@ void CHARGE_EVENT_h(void)
 
 void thermalRunaway_h(void)
 {
-	if(gCVT_s.cellvolt.cellVoltageMax > THERMAL_RUNAWAY_VOLTAGE_THRESHOLD || gCVT_s.cellTemp.tempMax > THERMAL_RUNAWAY_TEMP_THRESHOLD)
+	int16_t minTemp = 0;
+	bool TempDeltaThermlRunawayFlag = false;
+	for(int tempSensorCount = 0;tempSensorCount < CELL_TEMP_SENSOR_COUNT;tempSensorCount++)
+	{
+		for(int tempSampleCount;tempSampleCount < THERMAL_RUNAWAY_TEMP_SAMPLE_COUNT;tempSampleCount++)
+		{
+			minTemp = MIN(thermalRunawayCellTempWindow[tempSensorCount][tempSampleCount],minTemp);
+		}
+		if((gCVT_s.allCellTemp[tempSensorCount] - minTemp) > THERMAL_RUNAWAY_TEMP_DELTA_THRESHOLD)
+		{
+			TempDeltaThermlRunawayFlag = true;
+		}
+	}
+
+	if(TempDeltaThermlRunawayFlag || gCVT_s.cellvolt.cellVoltageMax > THERMAL_RUNAWAY_VOLTAGE_THRESHOLD || gCVT_s.cellTemp.tempMax > THERMAL_RUNAWAY_TEMP_THRESHOLD)
 	{
 		setError(THERMAL_RUNAWAY);
 	}
+
 	
 }
 
