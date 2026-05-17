@@ -1,42 +1,6 @@
+#include "battery_R.h"
+#include <stdint.h>
 typedef void (*eventHandler_t)(void);
-
- typedef enum
- {
-     OVER_VOLTAGE,
-     UNDER_VOLTAGE,
-     OVER_TEMP,
-     UNDER_TEMP,
-     OVER_LOAD,
-     OVER_CURRENT,
-     SHORT_CIRCUIT,
-     CELL_IMBALANCE,
-	 THERMAL_RUNAWAY,
-    
-     ERROR_MAX
- }error_t;
- typedef enum
- {
-    CHARGING_STATE,
-    DISCHARGING_STATE,
-    STATE_MAX
- }BatteryState_t;
-
- typedef enum
- {
-    VOLTAGE_TEMP_EVENT, //AFE ISR triggers when all the voltage and temp updated via DMA
-    DERATED_CURRENT_CAL_EVENT, 
-    PRECHARGE_EVENT,		   //TODO
-    CHARGE_DISCHARGE_EVENT,    //TODO
-    THERMAL_RUNAWAY_EVENT,     
-    SOO_EVENT,					
-    BLANCING_EVENT,            //TODO
-    EVENT_MAX
- }BatteryEvent_t;
-
- struct
- {
-     bool isErrorPresent;
- }gErrInfo_s;
 
  struct
  {
@@ -64,24 +28,6 @@ typedef void (*eventHandler_t)(void);
 	 uint8_t dischargeDeratedCurrent;
  }gSoo_s;
 
- typedef struct
- {
-     int16_t chargeCurrent;
-     int16_t dischargeCurrent;
- }current_t;
-
- typedef struct
- {
-     uint8_t tempMax;
-     uint8_t tempMin;
-     uint8_t tempMean;
- }tempData_t;
-
- tyepdef struct
- {
-	 uint8_t cellVoltageMax;
-	 uint8_t cellVoltageMin;
- }cellVoltageData_t
  struct
  {
      int16_t allCellTemp[CELL_TEMP_SENSOR_COUNT];
@@ -116,13 +62,14 @@ typedef void (*eventHandler_t)(void);
 						  }
 
  };
- gErrInfo_s arrayError[ERROR_MAX];
+
+ gErrInfo_s bmsError[ERROR_MAX];
 
  void errorInit(void)
  {
      for(int i = 0;i < ERROR_MAX;i++)
      {
-         arrayError[i].isErrorPresent = false;
+         bmsError[i].isErrorPresent = false;
      }
  }
  void BatteryInit(void)
@@ -261,6 +208,7 @@ void cellBlancing_h(void)
 	/*check list before balancing the cells
 		1)There should be no error
 		2)Check cell Temp threshold
+		3)AFE temp threahold
 	*/
 	for(int i = 0; i < CELLS_IN_SERIES_COUNT;i++)
 	{
@@ -283,12 +231,12 @@ void cellBlancing_h(void)
 
  void setError(error_t errorType)
  {
-     arrayError[errorType].isErrorPresent = true;
+     bmsError[errorType].isErrorPresent = true;
  }
 
  void clearError(error_t errorType)
  {
-     arrayError[errorType].isErrorPresent = false;
+     bmsError[errorType].isErrorPresent = false;
  }
  
 void getChargeSOPderatedFactor(uint8_t* chargeSopDeratedFactor)
