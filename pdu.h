@@ -17,3 +17,7 @@ typedef enum
 	PDU_EVENT_MAX
 }pduTaskEvent_t;
 
+
+/*Each module should have qHandler*/
+extern QueueHandle_t pduQueueHandle;
+
