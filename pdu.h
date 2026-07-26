@@ -8,7 +8,8 @@ typedef struct
 }pduData_t;
 
 
-#define QUEUE_EVENT_WAIT_TIME (500) /*500 MS*/
+#define QUEUE_EVENT_WAIT_TIME   (500) /*500 MS*/
+#define ECM_N                   (21U)
 typedef enum
 {
 	PDU_ENGAGE_FET,
